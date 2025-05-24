@@ -2,7 +2,7 @@ name: Run Trading Bot every 5 minutes
 
 on:
   schedule:
-    - cron: '*/5 * * * *'  # ทุก 5 นาที
+    #- cron: '*/5 * * * *'  # ทุก 5 นาที
   workflow_dispatch:
 
 jobs:
