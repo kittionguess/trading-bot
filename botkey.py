@@ -6,6 +6,12 @@ from datetime import datetime
 import requests
 import time
 
+from binance import __version__ as binance_version
+from binance.spot import Spot
+
+print(f"Using Binance Connector version: {binance_version}")
+
+
 # ตั้งค่า logging
 config_logging(logging, logging.INFO)
 logger = logging.getLogger()
