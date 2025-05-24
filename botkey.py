@@ -2,10 +2,12 @@ import os
 import logging
 import random
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from binance.spot import Spot as Client
 from binance.lib.utils import config_logging
 import requests
+from bs4 import BeautifulSoup
+import threading
 
 # ตั้งค่า logging
 config_logging(logging, logging.INFO)
@@ -16,35 +18,87 @@ BINANCE_API_KEY = os.getenv('BINANCE_API_KEY')
 BINANCE_API_SECRET = os.getenv('BINANCE_API_SECRET')
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv('LINE_CHANNEL_ACCESS_TOKEN')
 LINE_TARGET_ID = os.getenv('LINE_TARGET_ID')
-PROXY_URL = os.getenv('PROXY_URL')  # ในรูปแบบ: 'http://username:password@proxy-server:port'
-
-# รายการ Proxy Servers ตัวอย่าง (ควรใช้ Proxy ของคุณเอง)
-PROXY_LIST = [
-    'http://user:pass@proxy1.example.com:8080',
-    'http://user:pass@proxy2.example.com:8080',
-    'http://user:pass@proxy3.example.com:8080'
-]
 
 # ตรวจสอบค่าที่จำเป็น
 if not all([BINANCE_API_KEY, BINANCE_API_SECRET, LINE_CHANNEL_ACCESS_TOKEN, LINE_TARGET_ID]):
     logger.error("กรุณาตั้งค่าตัวแปรสภาพแวดล้อมที่จำเป็น")
     exit(1)
 
-def get_current_proxy():
-    """เลือก Proxy จากรายการที่มี"""
-    if PROXY_URL:
-        return PROXY_URL
-    return random.choice(PROXY_LIST) if PROXY_LIST else None
+# ตัวแปร全局สำหรับเก็บ Proxy List
+proxy_list = []
+last_proxy_update = None
+proxy_lock = threading.Lock()
+
+def fetch_proxy_list():
+    """ดึงรายการ Proxy จากเว็บไซต์ ProxyNova"""
+    global proxy_list, last_proxy_update
+    
+    try:
+        url = "https://www.proxynova.com/proxy-server-list/"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        new_proxy_list = []
+        
+        # ดึงข้อมูล Proxy จากตาราง
+        table = soup.find('table', {'id': 'tbl_proxy_list'})
+        if table:
+            rows = table.find_all('tr')[1:]  # ข้ามหัวตาราง
+            for row in rows:
+                cols = row.find_all('td')
+                if len(cols) >= 2:
+                    ip = cols[0].get_text().strip()
+                    port = cols[1].get_text().strip()
+                    
+                    # ตรวจสอบว่า IP ถูกต้อง
+                    if ip and port and ip.replace('.', '').isdigit():
+                        new_proxy_list.append(f"http://{ip}:{port}")
+        
+        with proxy_lock:
+            proxy_list = new_proxy_list
+            last_proxy_update = datetime.now()
+        
+        logger.info(f"อัปเดต Proxy List สำเร็จ ได้รับ {len(new_proxy_list)} ตัว")
+        return new_proxy_list
+        
+    except Exception as e:
+        logger.error(f"ดึง Proxy List ไม่สำเร็จ: {str(e)}")
+        return []
+
+def should_update_proxy_list():
+    """ตรวจสอบว่าควรอัปเดต Proxy List หรือไม่ (ทุก 3 ชั่วโมง)"""
+    global last_proxy_update
+    if last_proxy_update is None:
+        return True
+    return datetime.now() - last_proxy_update > timedelta(hours=3)
+
+def get_random_proxy():
+    """เลือก Proxy อย่างสุ่มจากรายการ"""
+    global proxy_list
+    
+    # อัปเดต Proxy List ถ้าครบ 3 ชั่วโมง
+    if should_update_proxy_list():
+        fetch_proxy_list()
+    
+    with proxy_lock:
+        if proxy_list:
+            proxy = random.choice(proxy_list)
+            logger.info(f"เลือก Proxy: {proxy}")
+            return proxy
+        return None
 
 def create_binance_client():
     """สร้าง Binance Client พร้อม Proxy"""
-    proxy_url = get_current_proxy()
+    proxy = get_random_proxy()
     proxies = {
-        'http': proxy_url,
-        'https': proxy_url
-    } if proxy_url else None
-    
-    logger.info(f"กำลังใช้ Proxy: {'[ถูกปิดใช้งาน]' if not proxy_url else '[ใช้งานอยู่]'}")
+        'http': proxy,
+        'https': proxy
+    } if proxy else None
     
     return Client(
         BINANCE_API_KEY,
@@ -65,12 +119,7 @@ def send_line_message(message):
     }
     
     try:
-        response = requests.post(
-            url,
-            headers=headers,
-            json=data,
-            timeout=10
-        )
+        response = requests.post(url, headers=headers, json=data, timeout=10)
         response.raise_for_status()
         logger.info(f"ส่ง LINE เรียบร้อย: {message}")
     except Exception as e:
@@ -129,36 +178,45 @@ def calculate_rsi(prices, period=14):
 
 def main():
     try:
-        start_time = datetime.now()
-        logger.info(f"เริ่มทำงานที่ {start_time}")
+        # ดึง Proxy List ครั้งแรก
+        fetch_proxy_list()
         
-        # ดึงข้อมูลจาก Binance
-        klines = get_binance_klines()
-        
-        if not klines:
-            send_line_message("⚠️ ไม่สามารถดึงข้อมูลจาก Binance ได้หลังจากลองหลายครั้ง")
-            return
-        
-        # แปลงข้อมูลเป็นราคาปิด
-        closes = [float(candle[4]) for candle in klines]
-        
-        # คำนวณ RSI
-        rsi = calculate_rsi(closes)
-        logger.info(f"RSI คำนวณได้: {rsi}")
-        
-        # ส่งการแจ้งเตือนตามเงื่อนไข
-        current_time = datetime.now().strftime('%H:%M')
-        if rsi < 30:
-            message = f"📉 RSI ต่ำกว่า 30 - โอกาสซื้อ BTC\nRSI: {rsi}\nเวลา: {current_time}"
-            send_line_message(message)
-        elif rsi > 70:
-            message = f"📈 RSI สูงกว่า 70 - โอกาสขาย BTC\nRSI: {rsi}\nเวลา: {current_time}"
-            send_line_message(message)
-        else:
-            logger.info(f"RSI อยู่ในช่วงปกติ: {rsi}")
+        while True:
+            start_time = datetime.now()
+            logger.info(f"เริ่มทำงานที่ {start_time}")
             
-        logger.info(f"ทำงานเสร็จสิ้นใน {datetime.now() - start_time}")
-        
+            # ดึงข้อมูลจาก Binance
+            klines = get_binance_klines()
+            
+            if not klines:
+                send_line_message("⚠️ ไม่สามารถดึงข้อมูลจาก Binance ได้หลังจากลองหลายครั้ง")
+            else:
+                # แปลงข้อมูลเป็นราคาปิด
+                closes = [float(candle[4]) for candle in klines]
+                
+                # คำนวณ RSI
+                rsi = calculate_rsi(closes)
+                logger.info(f"RSI คำนวณได้: {rsi}")
+                
+                # ส่งการแจ้งเตือนตามเงื่อนไข
+                current_time = datetime.now().strftime('%H:%M')
+                if rsi < 30:
+                    message = f"📉 RSI ต่ำกว่า 30 - โอกาสซื้อ BTC\nRSI: {rsi}\nเวลา: {current_time}"
+                    send_line_message(message)
+                elif rsi > 70:
+                    message = f"📈 RSI สูงกว่า 70 - โอกาสขาย BTC\nRSI: {rsi}\nเวลา: {current_time}"
+                    send_line_message(message)
+                else:
+                    logger.info(f"RSI อยู่ในช่วงปกติ: {rsi}")
+            
+            # คำนวณเวลาที่เหลือจนถึงรอบถัดไป
+            next_run = start_time + timedelta(hours=3)
+            sleep_time = (next_run - datetime.now()).total_seconds()
+            
+            if sleep_time > 0:
+                logger.info(f"รอจนถึงรอบถัดไปที่ {next_run} (อีก {sleep_time/3600:.2f} ชั่วโมง)")
+                time.sleep(sleep_time)
+            
     except Exception as e:
         logger.critical(f"เกิดข้อผิดพลาดร้ายแรง: {str(e)}", exc_info=True)
         send_line_message("⚠️ เกิดข้อผิดพลาดในระบบตรวจสอบ RSI")
