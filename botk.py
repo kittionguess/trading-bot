@@ -62,7 +62,7 @@ def calculate_rsi(closes):
 
 def main():
     try:
-        closes = get_binance_close_price()
+        closes = get_coingecko_prices()
         rsi = calculate_rsi(closes)
         print(f"RSI = {rsi:.2f}")
         send_line_message(TARGET_ID, f"📉 RSI ต่ำกว่า 30 - โอกาสซื้อ BTC (RSI={rsi:.2f})")
