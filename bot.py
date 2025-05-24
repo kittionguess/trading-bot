@@ -34,7 +34,8 @@ def send_line_message(user_id, message):
 
 def get_binance_close_price(symbol="BTCUSDT"):
     url = f'https://api.binance.com/api/v3/klines?symbol={symbol}&interval=1m&limit=14'
-    res = requests.get(url)
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    res = requests.get(url, headers=headers)
     res.raise_for_status()
     data = res.json()
     closes = [float(candle[4]) for candle in data]
