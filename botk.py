@@ -61,23 +61,22 @@ def calculate_rsi(closes):
     return rsi
 
 def main():
-    while True:
-        try:
-            closes = get_coingecko_prices()
-            rsi = calculate_rsi(closes)
-            print(f"RSI = {rsi:.2f}")
+    try:
+        closes = get_binance_close_price()
+        rsi = calculate_rsi(closes)
+        print(f"RSI = {rsi:.2f}")
+        send_line_message(TARGET_ID, f"📉 RSI ต่ำกว่า 30 - โอกาสซื้อ BTC (RSI={rsi:.2f})")
+        if rsi < 30:
+            send_line_message(TARGET_ID, f"📉 RSI ต่ำกว่า 30 - โอกาสซื้อ BTC (RSI={rsi:.2f})")
+        elif rsi > 70:
+            send_line_message(TARGET_ID, f"📈 RSI สูงกว่า 70 - โอกาสขาย BTC (RSI={rsi:.2f})")
+        else:
+            print("RSI อยู่ในช่วงปกติ")
 
-            if rsi < 30:
-                send_line_message(TARGET_ID, f"📉 RSI ต่ำกว่า 30 - โอกาสซื้อ Bitcoin (RSI={rsi:.2f})")
-            elif rsi > 70:
-                send_line_message(TARGET_ID, f"📈 RSI สูงกว่า 70 - โอกาสขาย Bitcoin (RSI={rsi:.2f})")
-            else:
-                print("RSI อยู่ในช่วงปกติ")
-
-        except Exception as e:
-            print("Error:", e)
-
-        time.sleep(300)  # รอ 5 นาที แล้วเช็คใหม่
+    except Exception as e:
+        print("Error:", e)
+        import traceback
+        traceback.print_exc()        
 
 if __name__ == "__main__":
     main()
