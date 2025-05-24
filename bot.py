@@ -64,7 +64,7 @@ def main():
         closes = get_binance_close_price()
         rsi = calculate_rsi(closes)
         print(f"RSI = {rsi:.2f}")
-
+        send_line_message(TARGET_ID, f"📉 RSI ต่ำกว่า 30 - โอกาสซื้อ BTC (RSI={rsi:.2f})")
         if rsi < 30:
             send_line_message(TARGET_ID, f"📉 RSI ต่ำกว่า 30 - โอกาสซื้อ BTC (RSI={rsi:.2f})")
         elif rsi > 70:
