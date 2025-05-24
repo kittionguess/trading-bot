@@ -24,7 +24,9 @@ jobs:
           pip install -r requirements.txt
       - name: Verify installation
         run: |
-          python -c "import binance; print(f'Binance connector version: {binance.__version__}')"    
+          python -c "from binance import __version__ as v; print(f'Binance connector version: {v}')"
+          python -c "import requests; print(f'Requests version: {requests.__version__}')"
+      
       - name: Run bot.py
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
